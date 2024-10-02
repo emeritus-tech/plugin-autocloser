@@ -1,13 +1,13 @@
 <?php
 /**
- * @file config.php :: 
+ * @file config.php ::
  * @  requires osTicket 1.17+ & PHP8.0+
  * @  multi-instance: yes
  *
  * @author Grizly <clonemeagain@gmail.com>
  * @see https://github.com/clonemeagain/plugin-autocloser
  * @fork by Cartmega <www.cartmega.com>
- * @see https://github.com/Cartmega/plugin-autocloser 
+ * @see https://github.com/Cartmega/plugin-autocloser
  */
 require_once INCLUDE_DIR . 'class.plugin.php';
 require_once INCLUDE_DIR . 'class.message.php';
@@ -33,30 +33,25 @@ class CloserPluginConfig extends PluginConfig {
     function pre_save(&$config, &$errors) {
         list ($__, $_N) = self::translate();
 
-        // Validate the free-text fields of numerical configurations are in fact numerical..
-        if (isset($config['purge-num']) &&
-	        !is_numeric($config['purge-num'])) {
-	            $errors['err'] = $__('Only a numeric value is valid for Purge Number.');
-	            return FALSE;
-	        }
-	
-            if (isset($config['purge-age']) &&
-                    !is_numeric($config['purge-age'])) {
+        // Validate the free-text fields of numerical configurations are in fact numerical.
+        if (!is_numeric($config['purge-num'])) {
+            $errors['err'] = $__('Only a numeric value is valid for Purge Number.');
+            return FALSE;
+        }
+        foreach (range(1, self::NUMBER_OF_SETTINGS) as $i) {
+            if (isset($config['purge-age-' . $i]) &&
+                    !is_numeric($config['purge-age-' . $i])) {
                 $errors['err'] = $__(
-                        'Max Ticket age only supports numeric values.');
+                        'Group ' . $i . ' Max Ticket age only supports numeric values.');
                 return FALSE;
             }
-            if (!(isset($config['robot-account'])) || ($config[('robot-account')]==0)) {
-            	//echo '<pre>'.print_r('robot-account'.' is not set "'.$config[('robot-account')].'"',2).'</pre>';
-                $errors['err'] = $__('Please choose a robot-account.');
-                return FALSE;            	
-            }
-            if (!(isset($config['admin-reply'])) || ($config[('admin-reply')]==0)) {
-            	//echo '<pre>'.print_r('admin-reply'.' is not set "'.$config[('admin-reply')].'"',2).'</pre>';
-                $errors['err'] = $__('Please choose an admin-reply.');
-                return FALSE;            	
-            }
+        }
 
+        if (self::NUMBER_OF_SETTINGS < 1) {
+            $errors['err'] = $__(
+                    "You must have at least 1 setting group, otherwise, you should disable the plugin.");
+            return FALSE;
+        }
         return TRUE;
     }
 

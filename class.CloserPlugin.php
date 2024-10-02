@@ -1,16 +1,13 @@
 <?php
+
 /**
- * @file class.CloserPlugin.php :: 
- * @  requires osTicket 1.17+ & PHP8.0+
- * @  multi-instance: yes
+ * @file class.CloserPlugin.php :: Requires PHP5.6+
  *
  * @author Grizly <clonemeagain@gmail.com>
  * @see https://github.com/clonemeagain/plugin-autocloser
- * @fork by Cartmega <www.cartmega.com>
- * @see https://github.com/Cartmega/plugin-autocloser 
  */
 foreach ([
- 'canned',
+'canned',
  'format',
  'list',
  'orm',
@@ -40,14 +37,6 @@ class CloserPlugin extends Plugin {
     const DEBUG = FALSE;
 
     /**
-     * Keeps all log entries for each run
-     * for output to syslog
-     *
-     * @var array
-     */
-    private $LOG = array();
-
-    /**
      * The name that appears in threads as: Closer Plugin.
      *
      * @var string
@@ -63,27 +52,20 @@ class CloserPlugin extends Plugin {
      * @see Plugin::bootstrap()
      */
     public function bootstrap() {
-	// ---------------------------------------------------------------------
-	// Fetch the config
-	// ---------------------------------------------------------------------
-	// Save config and instance for use later in the signal, when it is called
-	$config = $this->config;
-	$instance = $this->config->instance;
-
         // Listen for cron Signal, which only happens at end of class.cron.php:
-        Signal::connect('cron', function ($ignored, $data) use (&$config, $instance) {
+        Signal::connect('cron', function ($ignored, $data) {
 
             // Autocron is an admin option, we can filter out Autocron Signals
             // to ensure changing state for potentially hundreds/thousands
             // of tickets doesn't affect interactive Agent/User experience.
-            $use_autocron = $config->get('use_autocron');
+            $use_autocron = $this->getConfig()->get('use_autocron');
 
             // Autocron Cron Signals are sent with this array key set to TRUE
             $is_autocron = (isset($data['autocron']) && $data['autocron']);
 
             // Normal cron isn't Autocron:
             if (!$is_autocron || ($use_autocron && $is_autocron))
-                $this->logans_run_mode($config);
+                $this->logans_run_mode();
         });
     }
 
@@ -92,33 +74,40 @@ class CloserPlugin extends Plugin {
      * whatever. = Welcome to the 23rd Century. The perfect world of total
      * pleasure. ... there's just one catch.
      */
-    private function logans_run_mode(&$config) {
-	global $ost;
+    private function logans_run_mode() {
+        $config = $this->getConfig();
         if ($this->is_time_to_run($config)) {
-	
+            // Use the number of config groups to run the closer as many times as is needed.
+            foreach (range(1, CloserPluginConfig::NUMBER_OF_SETTINGS) as $group_id) {
+                if (!$config->get('group-enabled-' . $group_id)) {
+                    continue;
+                }
+
                 try {
-                    $open_ticket_ids = $this->find_ticket_ids($config);
+                    $open_ticket_ids = $this->find_ticket_ids($config, $group_id);
                     if (self::DEBUG) {
-                    		$this->LOG[]=count($open_ticket_ids) . " open tickets.";
+                        error_log(
+                                "CloserPlugin group [$group_id] $group_name has " .
+                                count($open_ticket_ids) . " open tickets.");
                     }
 
                     // Bail if there is no work to do
                     if (!count($open_ticket_ids)) {
-                        return true;
+                        continue;
                     }
 
-                    // Find the new TicketStatus from the Setting config:
+                    // Find the new TicketStatus from the Setting Group config:
                     $new_status = TicketStatus::lookup(
                                     array(
-                                        'id' => (int) $config->get('to-status')
+                                        'id' => (int) $config->get('to-status-' . $group_id)
                     ));
 
                     // Admin note is just text
-                    $admin_note = $config->get('admin-note') ?: FALSE;
+                    $admin_note = $config->get('admin-note-' . $group_id) ?: FALSE;
 
-                    // Fetch the actual content of the reply, "html" means load with images, 
+                    // Fetch the actual content of the reply, "html" means load with images,
                     // I don't think it works with attachments though.
-                    $admin_reply = $config->get('admin-reply');
+                    $admin_reply = $config->get('admin-reply-' . $group_id);
                     if (is_numeric($admin_reply) && $admin_reply) {
                         // We have a valid Canned_Response ID, fetch the actual Canned:
                         $admin_reply = Canned::lookup($admin_reply);
@@ -129,11 +118,12 @@ class CloserPlugin extends Plugin {
                     }
 
                     if (self::DEBUG) {
-                    		$this->LOG[]="Found the following details:\nAdmin Note: $admin_note\n\nAdmin Reply: $admin_reply\n";
+                        print
+                                "Found the following details:\nAdmin Note: $admin_note\n\nAdmin Reply: $admin_reply\n";
                     }
 
-                    // Get the robot for this config
-                    $robot = $config->get('robot-account');
+                    // Get the robot for this group
+                    $robot = $this->getConfig()->get('robot-account-' . $group_id);
                     $robot = ($robot>0)? $robot = Staff::lookup($robot) : null;
 
                     // Go through each ticket ID:
@@ -142,7 +132,7 @@ class CloserPlugin extends Plugin {
                         // Fetch ticket as an Object
                         $ticket = Ticket::lookup($ticket_id);
                         if (!$ticket instanceof Ticket) {
-	                        $this->LOG[]="Ticket $ticket_id was not instatiable. :-(";
+                            error_log("Ticket $ticket_id was not instatiable. :-(");
                             continue;
                         }
 
@@ -171,16 +161,15 @@ class CloserPlugin extends Plugin {
                         // Actually change the ticket status
                         $this->change_ticket_status($ticket, $new_status);
                     }
-
-                    $this->print2log();
-                        
                 } catch (Exception $e) {
                     // Well, something borked
-                    $this->LOG[]="Exception encountered, we'll soldier on, but something is broken!";
-                    $this->LOG[]=$e->getMessage();
-                    if (self::DEBUG) {$this->LOG[]='<pre>'.print_r($e->getTrace(),2).'</pre>';}
-                    $this->print2log();
+                    error_log(
+                            "Exception encountered, we'll soldier on, but something is broken!");
+                    error_log($e->getMessage());
+                    if (self::DEBUG)
+                        print_r($e->getTrace());
                 }
+            }
         }
     }
 
@@ -192,18 +181,17 @@ class CloserPlugin extends Plugin {
      * @param PluginConfig $config
      * @return boolean
      */
-    private function is_time_to_run(PluginConfig &$config) {
+    private function is_time_to_run(PluginConfig $config) {
         // We can store arbitrary things in the config, like, when we ran this last:
         $last_run = $config->get('last-run');
-        $now = Misc::dbtime(); // Never assume about time.. 
+        $now = Misc::dbtime(); // Never assume about time..
         $config->set('last-run', $now);
 
         // assume a freqency of "Every Cron" means it is always overdue
         $next_run = 0;
 
         // Convert purge frequency to a comparable format to timestamps:
-	 $fr=($config->get('frequency') > 0) ? $config->get('frequency') : 0;
-        if ($freq_in_config = (int) $fr) {
+        if ($freq_in_config = (int) $config->get('purge-frequency')) {
             // Calculate when we want to run next, config hours into seconds,
             // plus the last run is the timestamp of the next scheduled run
             $next_run = $last_run + ($freq_in_config * 3600);
@@ -230,11 +218,10 @@ class CloserPlugin extends Plugin {
      * @param TicketStatus $new_status
      */
     private function change_ticket_status(Ticket $ticket, TicketStatus $new_status) {
-	 global $ost;
         if (self::DEBUG) {
-        	$this->LOG[]=
+            error_log(
                     "Setting status " . $new_status->getState() .
-                    " for ticket {$ticket->getId()}::{$ticket->getSubject()}";
+                    " for ticket {$ticket->getId()}::{$ticket->getSubject()}");
         }
 
         // Start by setting the last update and closed timestamps to now
@@ -261,19 +248,19 @@ class CloserPlugin extends Plugin {
      * Retrieves an array of ticket_id's from the database
      *
      * @param PluginConfig $config
+     * @param int $group_id
      * @return array of integers that are Ticket::lookup compatible ID's of Open
      *         Tickets
      * @throws Exception so you have something interesting to read in your cron
      *         logs..
      */
-    private function find_ticket_ids(PluginConfig &$config) {
-	 global $ost;
-        $from_status = (int) $config->get('from-status');
+    private function find_ticket_ids(PluginConfig $config, $group_id) {
+        $from_status = (int) $config->get('from-status-' . $group_id);
         if (!$from_status) {
             throw new \Exception("Invalid parameter (int) from_status needs to be > 0");
         }
 
-        $age_days = (int) $config->get('purge-age');
+        $age_days = (int) $config->get('purge-age-' . $group_id);
         if ($age_days < 1) {
             throw new \Exception("Invalid parameter (int) age_days needs to be > 0");
         }
@@ -283,8 +270,8 @@ class CloserPlugin extends Plugin {
             throw new \Exception("Invalid parameter (int) max needs to be > 0");
         }
 
-        $whereFilter = ($config->get('close-only-answered')) ? ' AND isanswered=1' : '';
-        $whereFilter .= ($config->get('close-only-overdue')) ? ' AND isoverdue=1' : '';
+        $whereFilter = ($config->get('close-only-answered-' . $group_id)) ? ' AND isanswered=1' : '';
+        $whereFilter .= ($config->get('close-only-overdue-' . $group_id)) ? ' AND isoverdue=1' : '';
 
         // Ticket query, note MySQL is doing all the date maths:
         // Sidebar: Why haven't we moved to PDO yet?
@@ -297,14 +284,14 @@ class CloserPlugin extends Plugin {
 
         $sql = sprintf(
                 "
-SELECT ticket_id 
+SELECT ticket_id
 FROM %s WHERE lastupdate < DATE_SUB(NOW(), INTERVAL %d DAY)
 AND status_id=%d %s
 ORDER BY ticket_id ASC
 LIMIT %d", TICKET_TABLE, $age_days, $from_status, $whereFilter, $max);
 
         if (self::DEBUG) {
-        	$this->LOG[]="Looking for tickets with query: $sql";
+            error_log("Looking for tickets with query: $sql");
         }
 
         $r = db_query($sql);
@@ -327,7 +314,7 @@ LIMIT %d", TICKET_TABLE, $age_days, $from_status, $whereFilter, $max);
      */
     function post_reply(Ticket $ticket, TicketStatus $new_status, $admin_reply, Staff $robot = null) {
         // We need to override this for the notifications
-        global $ost, $thisstaff;
+        global $thisstaff;
 
         if ($robot) {
             $assignee = $robot;
@@ -342,7 +329,7 @@ LIMIT %d", TICKET_TABLE, $age_days, $from_status, $whereFilter, $max);
         }
         // This actually bypasses any authentication/validation checks..
         $thisstaff = $assignee;
-	
+
         // Replace any ticket variables in the message:
         $variables = [
             'recipient' => $ticket->getOwner()
@@ -369,7 +356,6 @@ LIMIT %d", TICKET_TABLE, $age_days, $from_status, $whereFilter, $max);
         // Build an array of values to send to the ticket's postReply function
         // 'emailcollab' => FALSE // don't send notification to all collaborators.. maybe.. dunno.
         $vars = [
-		'reply-to' => 'all',
             'response' => $custom_reply
         ];
         $errors = [];
@@ -418,7 +404,7 @@ LIMIT %d", TICKET_TABLE, $age_days, $from_status, $whereFilter, $max);
         foreach ($thread->getEntries()->all() as $entry) {
             if ($this->is_valid_thread_entry($entry, FALSE, TRUE)) {
                 // We'll just render each response, overwriting the previous one..
-                // screw it. 
+                // screw it.
                 $last = $this->render_thread_entry($entry);
             }
         }
@@ -438,7 +424,7 @@ LIMIT %d", TICKET_TABLE, $age_days, $from_status, $whereFilter, $max);
             return $msg;
         }
 
-        // Iterate through all the thread entries (in order), 
+        // Iterate through all the thread entries (in order),
         // Not sure the ->order_by() thing even does anything.
         foreach ($thread->getEntries()
                 ->order_by('created', QuerySet::ASC)
@@ -462,7 +448,7 @@ LIMIT %d", TICKET_TABLE, $age_days, $from_status, $whereFilter, $max);
         $from = ($entry->get('type') == 'R') ? 'Sent' : 'Received';
         $tag = ($entry->get('format') == 'text') ? 'pre' : 'p';
         $when = Format::datetime(strtotime($entry->get('created')));
-        // TODO: Maybe make this a CannedResponse or admin template? 
+        // TODO: Maybe make this a CannedResponse or admin template?
         return <<<PIECE
 <hr />
 <p class="thread">
@@ -493,7 +479,7 @@ PIECE;
             return FALSE;
         }
         if (self::DEBUG) {
-        	$this->LOG[]=printf("Testing thread entry: %s : %s\n", $entry->get('type'), $entry->get('title'));
+            printf("Testing thread entry: %s : %s\n", $entry->get('type'), $entry->get('title'));
         }
         if (isset($entry->model->ht['type'])) {
             if ($response && $entry->get('type') == 'R') {
@@ -514,14 +500,14 @@ PIECE;
      *
      * @see Plugin::uninstall()
      */
-    function uninstall(&$errors) {
-        $errors = array();
-        global $ost;
-        // Send an alert to the system admin:
-        $ost->alertAdmin(self::PLUGIN_NAME . ' has been uninstalled', "You wanted that right?", true);
+function uninstall(&$errors) {
+    global $ost;
+    // Send an alert to the system admin:
+    $ost->alertAdmin(self::PLUGIN_NAME . ' has been uninstalled', "You wanted that right?", true);
 
-        parent::uninstall($errors);
-    }
+    parent::uninstall($errors);
+}
+
 
     /**
      * Plugins seem to want this.
@@ -530,15 +516,4 @@ PIECE;
         return array();
     }
 
-    /**
-     * Outputs all log entries to the syslog
-     *
-     */
-    private function print2log() {
-    	 global $ost;
-    	 if (empty($this->LOG)) {return false;}
- 	 $msg='';
- 	 foreach($this->LOG as $key=>$value) {$msg.=$value.'<br>';}
-	 $ost->logWarning(self::PLUGIN_NAME, $msg, false);
-    }
 }
