@@ -13,6 +13,7 @@ require_once INCLUDE_DIR . 'class.plugin.php';
 require_once INCLUDE_DIR . 'class.message.php';
 
 class CloserPluginConfig extends PluginConfig {
+    const NUMBER_OF_SETTINGS = 4;
 
     // Provide compatibility function for versions of osTicket prior to
     // translation support (v1.9.4)

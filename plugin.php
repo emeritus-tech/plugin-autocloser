@@ -4,9 +4,9 @@
  'name' => 'Ticket Closer',
  'author' => 'clonemeagain@gmail.com',
  'description' => 'Changes ticket statuses based on age.',
- 'url' => 'https://github.com/clonemeagain/osticket-plugin-closer',
+ 'url' => 'https://github.com/emeritus-tech/osticket-plugin-closer',
  'plugin' => 'class.CloserPlugin.php:CloserPlugin',
- 'ost_version' =>    '1.17', # Require osTicket v1.17	
+ 'ost_version' =>    '1.18', # Require osTicket v1.17
 );
 
 /*
@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.1.0] - 2023-01-15
 ### Added
-- Consolidate messages and log to osTicket syslog once per run, 
+- Consolidate messages and log to osTicket syslog once per run,
   instead of multiple times per run.
 
 ### Fixed
