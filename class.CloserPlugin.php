@@ -34,7 +34,7 @@ class CloserPlugin extends Plugin {
      *
      * @var boolean
      */
-    const DEBUG = FALSE;
+    const DEBUG = TRUE;
 
     /**
      * The name that appears in threads as: Closer Plugin.
